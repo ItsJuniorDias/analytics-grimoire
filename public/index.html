@@ -45,6 +45,29 @@
     table { width: 100%; border-collapse: collapse; font-size: 14px; }
     th, td { text-align: left; padding: 10px; border-bottom: 1px solid var(--border); }
     th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; }
+    /* Tabela de eventos individuais: linha principal + linha params abaixo */
+    .events-tbl td { vertical-align: middle; }
+    .events-tbl .col-time { color: var(--muted); font-size: 12px; white-space: nowrap; }
+    .events-tbl .col-event { }
+    .events-tbl .col-event .badge {
+      display: inline-block; background: var(--surface2); color: var(--accent);
+      padding: 3px 8px; border-radius: 4px; font-size: 12px; font-weight: 500;
+    }
+    .events-tbl .col-user, .events-tbl .col-platform, .events-tbl .col-country {
+      color: var(--muted); font-size: 13px; font-family: ui-monospace, monospace;
+    }
+    .events-tbl .col-value { color: var(--text); font-size: 13px; }
+    .events-tbl .params-row td {
+      padding: 4px 10px 10px 10px; border-bottom: 1px solid var(--border);
+      color: var(--muted); font-size: 12px; font-family: ui-monospace, monospace;
+      background: rgba(255,255,255,0.02);
+    }
+    .events-tbl .params-row .params-badge {
+      display: inline-block; background: var(--surface2); padding: 2px 6px;
+      border-radius: 3px; margin-right: 8px; font-size: 11px;
+    }
+    /* Remove borda dupla entre linha principal e sua linha de params */
+    .events-tbl tr.main-row td { border-bottom: none; }
     .hidden { display: none; }
     .err { color: var(--accent); font-size: 14px; margin-top: 8px; }
     canvas { width: 100%; max-height: 260px; }
@@ -87,6 +110,23 @@
       <h2>Todos os eventos</h2>
       <table id="events"><thead><tr><th>Evento</th><th>Total</th></tr></thead><tbody></tbody></table>
     </div>
+
+    <div class="section">
+      <h2>Últimos eventos <span style="color:var(--muted);font-size:14px;font-weight:normal">(100 mais recentes)</span></h2>
+      <table class="events-tbl" id="recent-events">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Event</th>
+            <th>User</th>
+            <th>Platform</th>
+            <th>Country</th>
+            <th>Value</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
   </div>
 
   <script>
@@ -106,11 +146,16 @@
       err.classList.add("hidden");
 
       try {
-        const res = await fetch(`/api/stats?password=${encodeURIComponent(password)}&days=${days}`);
-        if (res.status === 401) { showErr("Senha incorreta."); return; }
-        if (!res.ok) { showErr("Erro ao carregar dados."); return; }
-        const data = await res.json();
+        const [statsRes, eventsRes] = await Promise.all([
+          fetch(`/api/stats?password=${encodeURIComponent(password)}&days=${days}`),
+          fetch(`/api/recent-events?password=${encodeURIComponent(password)}&limit=100`),
+        ]);
+        if (statsRes.status === 401) { showErr("Senha incorreta."); return; }
+        if (!statsRes.ok) { showErr("Erro ao carregar dados."); return; }
+        const data = await statsRes.json();
+        const recent = eventsRes.ok ? (await eventsRes.json()).events : [];
         render(data);
+        renderRecentEvents(recent);
         // guarda a senha na sessão para o refresh
         sessionStorage.setItem("gpw", password);
       } catch (e) {
@@ -179,6 +224,75 @@
       return String(s).replace(/[&<>"']/g, c => (
         { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
       ));
+    }
+
+    // Converte "BR" -> "🇧🇷" combinando dois "regional indicator symbols".
+    // Cada letra A-Z tem um codepoint na faixa 0x1F1E6-0x1F1FF; os dois juntos
+    // o SO renderiza como bandeira. Retorna "" pra códigos inválidos.
+    function flagEmoji(cc) {
+      if (!cc || typeof cc !== "string" || cc.length !== 2) return "";
+      const upper = cc.toUpperCase();
+      if (!/^[A-Z]{2}$/.test(upper)) return "";
+      const A = 0x1F1E6, aCode = "A".charCodeAt(0);
+      return String.fromCodePoint(
+        A + (upper.charCodeAt(0) - aCode),
+        A + (upper.charCodeAt(1) - aCode)
+      );
+    }
+
+    // Renderiza a tabela de últimos eventos individuais.
+    // Cada evento vira 2 linhas: a principal (colunas) e uma abaixo com os params.
+    function renderRecentEvents(events) {
+      const tbody = document.querySelector("#recent-events tbody");
+      if (!events.length) {
+        tbody.innerHTML = `<tr><td colspan="6" style="color:var(--muted)">Sem eventos ainda</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = events.map(ev => {
+        // Value: prioridade — price/value (compras) > plan > source > "—"
+        // A ideia é sempre mostrar o "atributo principal" do evento se houver.
+        const p = ev.properties || {};
+        let value = "—";
+        if (p.price !== undefined) value = String(p.price);
+        else if (p.value !== undefined) value = String(p.value);
+        else if (p.plan) value = String(p.plan);
+        else if (p.source) value = String(p.source);
+        else if (p.story_id) value = String(p.story_id);
+        else if (p.content_id) value = String(p.content_id);
+
+        // Formata timestamp no fuso local do navegador
+        const d = new Date(ev.time);
+        const timeStr = d.toLocaleString("pt-BR", {
+          day: "2-digit", month: "2-digit", year: "numeric",
+          hour: "2-digit", minute: "2-digit", second: "2-digit"
+        });
+
+        // Linha de params: cada key: value como badge
+        const paramEntries = Object.entries(p);
+        const paramsCell = paramEntries.length
+          ? paramEntries.map(([k, v]) =>
+              `<span class="params-badge">${escapeHtml(k)}: ${escapeHtml(typeof v === "object" ? JSON.stringify(v) : v)}</span>`
+            ).join(" ")
+          : `<span style="color:var(--muted);font-style:italic">sem params</span>`;
+
+        return `
+          <tr class="main-row">
+            <td class="col-time">${escapeHtml(timeStr)}</td>
+            <td class="col-event"><span class="badge">${escapeHtml(ev.event)}</span></td>
+            <td class="col-user">${escapeHtml(ev.user)}</td>
+            <td class="col-platform">${escapeHtml(ev.platform)}</td>
+            <td class="col-country">${ev.country && ev.country !== "—"
+              ? `<span style="font-size:16px;margin-right:4px;">${flagEmoji(ev.country)}</span>${escapeHtml(ev.country)}`
+              : `<span style="color:var(--muted)">—</span>`
+            }</td>
+            <td class="col-value">${escapeHtml(value)}</td>
+          </tr>
+          <tr class="params-row">
+            <td colspan="6">${paramsCell}</td>
+          </tr>
+        `;
+      }).join("");
     }
 
     // Gráfico de linha simples desenhado no canvas (sem bibliotecas externas).

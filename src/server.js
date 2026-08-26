@@ -57,11 +57,15 @@ app.post("/track", async (req, res) => {
       ? req.body.properties : {};
     const appVersion = typeof req.body.app_version === "string" ? req.body.app_version : null;
     const platform = typeof req.body.platform === "string" ? req.body.platform : "ios";
+    // country: opcional, 2 letras (ISO 3166-1 alpha-2). O cliente iOS envia
+    // Locale.current.region?.identifier. Se vier maior ou vazio, ignora.
+    const rawCountry = typeof req.body.country === "string" ? req.body.country.trim().toUpperCase() : null;
+    const country = rawCountry && rawCountry.length === 2 ? rawCountry : null;
 
     await pool.query(
-      `INSERT INTO events (device_id, name, properties, app_version, platform)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [String(device_id), String(name), properties, appVersion, platform]
+      `INSERT INTO events (device_id, name, properties, app_version, platform, country)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [String(device_id), String(name), properties, appVersion, platform, country]
     );
 
     res.status(201).json({ ok: true });
@@ -158,6 +162,44 @@ app.get("/api/stats", async (req, res) => {
     });
   } catch (err) {
     console.error("Erro no /api/stats:", err);
+    res.status(500).json({ error: "internal" });
+  }
+});
+
+// ------------------------------------------------------------------
+// Últimos eventos individuais — o dashboard mostra numa tabela.
+// Diferente de /api/stats que agrega, este retorna cada linha.
+// ------------------------------------------------------------------
+app.get("/api/recent-events", async (req, res) => {
+  try {
+    if (req.query.password !== DASHBOARD_PASSWORD) {
+      return res.status(401).json({ error: "unauthorized" });
+    }
+
+    const limit = Math.max(1, Math.min(500, parseInt(req.query.limit) || 100));
+
+    const r = await pool.query(
+      `SELECT id, created_at, name, device_id, platform, country, properties
+       FROM events
+       ORDER BY created_at DESC
+       LIMIT $1`,
+      [limit]
+    );
+
+    res.json({
+      events: r.rows.map(row => ({
+        id: row.id,
+        time: row.created_at,
+        event: row.name,
+        // Só os 8 primeiros chars do device_id — legível e ainda único no dia-a-dia.
+        user: String(row.device_id).slice(0, 8),
+        platform: row.platform || "—",
+        country: row.country || "—",
+        properties: row.properties || {},
+      })),
+    });
+  } catch (err) {
+    console.error("Erro no /api/recent-events:", err);
     res.status(500).json({ error: "internal" });
   }
 });

@@ -27,9 +27,14 @@ export async function initSchema() {
       properties   JSONB       NOT NULL DEFAULT '{}'::jsonb,
       app_version  TEXT,
       platform     TEXT        DEFAULT 'ios',
+      country      VARCHAR(2),
       created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
     );
   `);
+
+  // Migration idempotente: se a tabela já existe sem a coluna country
+  // (bancos antigos), adiciona sem quebrar nada.
+  await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS country VARCHAR(2);`);
 
   // Índices para as consultas do dashboard ficarem rápidas mesmo com
   // muitos eventos: por nome de evento e por data.
