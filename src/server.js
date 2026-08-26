@@ -204,6 +204,34 @@ app.get("/api/recent-events", async (req, res) => {
   }
 });
 
+// ------------------------------------------------------------------
+// ZERAR EVENTOS — apaga TODA a tabela events e reinicia o id.
+// Ação irreversível: protegida pela senha do dashboard.
+// Usa TRUNCATE (mais rápido que DELETE em tabelas grandes) com
+// RESTART IDENTITY pra reiniciar o BIGSERIAL do id em 1.
+// ------------------------------------------------------------------
+app.post("/api/events/clear", async (req, res) => {
+  try {
+    if (req.query.password !== DASHBOARD_PASSWORD) {
+      return res.status(401).json({ error: "unauthorized" });
+    }
+
+    // Conta antes pra devolver quantos foram apagados (COUNT numa
+    // tabela pequena é barato; se a tabela crescer muito, dá pra
+    // trocar por pg_class.reltuples pra uma estimativa).
+    const before = await pool.query(`SELECT COUNT(*)::int AS n FROM events`);
+    const deleted = before.rows[0].n;
+
+    await pool.query(`TRUNCATE TABLE events RESTART IDENTITY`);
+
+    console.log(`Eventos zerados: ${deleted} linhas apagadas.`);
+    res.json({ ok: true, deleted });
+  } catch (err) {
+    console.error("Erro no /api/events/clear:", err);
+    res.status(500).json({ error: "internal" });
+  }
+});
+
 // Healthcheck (o Render usa para saber se o serviço está vivo).
 app.get("/health", (_req, res) => res.json({ ok: true }));
 

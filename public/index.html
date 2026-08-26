@@ -26,6 +26,10 @@
     }
     button { background: var(--accent); border: none; cursor: pointer; font-weight: 600; }
     button:hover { opacity: 0.9; }
+    /* Botão destrutivo (zerar) — visualmente separado, tom mais escuro
+       pra não competir visualmente com "Ver dados". */
+    button.danger { background: #4a1410; border: 1px solid #7a1a15; margin-left: auto; }
+    button.danger:hover { background: #7a1a15; opacity: 1; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
     .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
     .card .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }
@@ -85,6 +89,7 @@
       <option value="90">Últimos 90 dias</option>
     </select>
     <button onclick="load()">Ver dados</button>
+    <button class="danger" onclick="clearEvents()" title="Apaga TODOS os eventos do banco (irreversível)">Zerar eventos</button>
   </div>
   <p class="err hidden" id="err"></p>
 
@@ -166,6 +171,37 @@
     function showErr(msg) {
       const err = document.getElementById("err");
       err.textContent = msg; err.classList.remove("hidden");
+    }
+
+    // Zera TODA a tabela de eventos. Duas proteções contra clique acidental:
+    // 1) exige senha do dashboard preenchida
+    // 2) prompt() pedindo digitar ZERAR (case-sensitive) — mais seguro
+    //    que um confirm() só, porque exige ato deliberado do usuário.
+    async function clearEvents() {
+      const password = document.getElementById("password").value;
+      if (!password) { showErr("Digite a senha do dashboard antes de zerar."); return; }
+
+      const answer = prompt(
+        "⚠️ ATENÇÃO: isso vai APAGAR TODOS os eventos do banco.\n" +
+        "Ação irreversível.\n\n" +
+        "Digite ZERAR (maiúsculo) para confirmar:"
+      );
+      if (answer !== "ZERAR") return;
+
+      try {
+        const res = await fetch(
+          `/api/events/clear?password=${encodeURIComponent(password)}`,
+          { method: "POST" }
+        );
+        if (res.status === 401) { showErr("Senha incorreta."); return; }
+        if (!res.ok) { showErr("Erro ao zerar eventos."); return; }
+        const data = await res.json();
+        alert(`${data.deleted} eventos apagados.`);
+        // Recarrega o dashboard — vai mostrar tudo em 0.
+        load();
+      } catch (e) {
+        showErr("Não foi possível conectar ao servidor.");
+      }
     }
 
     function render(data) {
