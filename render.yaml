@@ -1,0 +1,26 @@
+# Configuração para deploy automático no Render.
+# Com este arquivo, o Render cria o serviço web + o banco Postgres juntos.
+# Basta conectar o repositório e o Render lê isto.
+
+services:
+  - type: web
+    name: grimoire-analytics
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: grimoire-db
+          property: connectionString
+      - key: DASHBOARD_PASSWORD
+        sync: false          # você define no painel do Render (senha do dashboard)
+      - key: INGEST_KEY
+        sync: false          # opcional: chave para o app enviar eventos
+
+databases:
+  - name: grimoire-db
+    plan: free

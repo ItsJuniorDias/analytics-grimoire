@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Grimoire — Analytics</title>
+  <style>
+    :root {
+      --bg: #0c0a09; --surface: #1a1512; --surface2: #241d18;
+      --text: #e8dcc6; --muted: #a89684; --accent: #c1352a; --brass: #c79a3e;
+      --border: #33291f;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg); color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      padding: 24px; max-width: 1100px; margin: 0 auto;
+    }
+    h1 { font-size: 28px; margin-bottom: 4px; }
+    .sub { color: var(--muted); font-size: 14px; margin-bottom: 24px; }
+    .login { display: flex; gap: 8px; margin-bottom: 24px; }
+    input, select, button {
+      background: var(--surface2); color: var(--text);
+      border: 1px solid var(--border); border-radius: 8px;
+      padding: 10px 14px; font-size: 14px;
+    }
+    button { background: var(--accent); border: none; cursor: pointer; font-weight: 600; }
+    button:hover { opacity: 0.9; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+    .card .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }
+    .card .value { font-size: 34px; font-weight: 700; margin-top: 6px; }
+    .card .value.accent { color: var(--brass); }
+    .section { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin-bottom: 24px; }
+    .section h2 { font-size: 18px; margin-bottom: 16px; }
+    .funnel-step { margin-bottom: 12px; }
+    .funnel-step .row { display: flex; justify-content: space-between; font-size: 14px; margin-bottom: 4px; }
+    .funnel-step .bar { height: 28px; background: var(--surface2); border-radius: 6px; overflow: hidden; }
+    .funnel-step .fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--brass)); border-radius: 6px; transition: width 0.5s; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { text-align: left; padding: 10px; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; }
+    .hidden { display: none; }
+    .err { color: var(--accent); font-size: 14px; margin-top: 8px; }
+    canvas { width: 100%; max-height: 260px; }
+  </style>
+</head>
+<body>
+  <h1>Grimoire Analytics</h1>
+  <p class="sub">Conversão e engajamento — dados anônimos</p>
+
+  <div class="login" id="login">
+    <input type="password" id="password" placeholder="Senha do dashboard" />
+    <select id="days">
+      <option value="7">Últimos 7 dias</option>
+      <option value="30" selected>Últimos 30 dias</option>
+      <option value="90">Últimos 90 dias</option>
+    </select>
+    <button onclick="load()">Ver dados</button>
+  </div>
+  <p class="err hidden" id="err"></p>
+
+  <div id="content" class="hidden">
+    <div class="grid" id="cards"></div>
+
+    <div class="section">
+      <h2>Funil de conversão</h2>
+      <div id="funnel"></div>
+    </div>
+
+    <div class="section">
+      <h2>Eventos por dia</h2>
+      <canvas id="chart" height="120"></canvas>
+    </div>
+
+    <div class="section">
+      <h2>Histórias mais abertas</h2>
+      <table id="stories"><thead><tr><th>História</th><th>Aberturas</th></tr></thead><tbody></tbody></table>
+    </div>
+
+    <div class="section">
+      <h2>Todos os eventos</h2>
+      <table id="events"><thead><tr><th>Evento</th><th>Total</th></tr></thead><tbody></tbody></table>
+    </div>
+  </div>
+
+  <script>
+    const FUNNEL_LABELS = {
+      app_opened: "Abriu o app",
+      story_opened: "Abriu uma história",
+      paywall_viewed: "Viu o paywall",
+      purchase_started: "Começou a assinar",
+      purchase_completed: "Assinou",
+    };
+
+    async function load() {
+      const password = document.getElementById("password").value;
+      const days = document.getElementById("days").value;
+      const err = document.getElementById("err");
+      err.classList.add("hidden");
+
+      try {
+        const res = await fetch(`/api/stats?password=${encodeURIComponent(password)}&days=${days}`);
+        if (res.status === 401) { showErr("Senha incorreta."); return; }
+        if (!res.ok) { showErr("Erro ao carregar dados."); return; }
+        const data = await res.json();
+        render(data);
+        // guarda a senha na sessão para o refresh
+        sessionStorage.setItem("gpw", password);
+      } catch (e) {
+        showErr("Não foi possível conectar ao servidor.");
+      }
+    }
+
+    function showErr(msg) {
+      const err = document.getElementById("err");
+      err.textContent = msg; err.classList.remove("hidden");
+    }
+
+    function render(data) {
+      document.getElementById("login").classList.remove("hidden");
+      document.getElementById("content").classList.remove("hidden");
+
+      // Cards de resumo
+      document.getElementById("cards").innerHTML = `
+        <div class="card"><div class="label">Dispositivos únicos</div><div class="value">${data.unique_devices}</div></div>
+        <div class="card"><div class="label">Total de eventos</div><div class="value">${data.total_events}</div></div>
+        <div class="card"><div class="label">Assinaram</div><div class="value accent">${data.funnel.purchase_completed}</div></div>
+        <div class="card"><div class="label">Conversão do paywall</div><div class="value accent">${data.conversion_rate}%</div></div>
+      `;
+
+      // Funil
+      const steps = Object.keys(FUNNEL_LABELS);
+      const maxVal = Math.max(data.funnel[steps[0]] || 1, 1);
+      document.getElementById("funnel").innerHTML = steps.map(step => {
+        const val = data.funnel[step] || 0;
+        const pct = (val / maxVal) * 100;
+        return `<div class="funnel-step">
+          <div class="row"><span>${FUNNEL_LABELS[step]}</span><span>${val}</span></div>
+          <div class="bar"><div class="fill" style="width:${pct}%"></div></div>
+        </div>`;
+      }).join("");
+
+      // Tabela de histórias
+      const storiesBody = document.querySelector("#stories tbody");
+      storiesBody.innerHTML = data.top_stories.length
+        ? data.top_stories.map(s => `<tr><td>${s.title || s.story_id}</td><td>${s.opens}</td></tr>`).join("")
+        : `<tr><td colspan="2" style="color:var(--muted)">Sem dados ainda</td></tr>`;
+
+      // Tabela de eventos
+      const eventsBody = document.querySelector("#events tbody");
+      eventsBody.innerHTML = data.by_event.length
+        ? data.by_event.map(e => `<tr><td>${e.name}</td><td>${e.count}</td></tr>`).join("")
+        : `<tr><td colspan="2" style="color:var(--muted)">Sem dados ainda</td></tr>`;
+
+      drawChart(data.daily);
+    }
+
+    // Gráfico de linha simples desenhado no canvas (sem bibliotecas externas).
+    function drawChart(daily) {
+      const canvas = document.getElementById("chart");
+      const ctx = canvas.getContext("2d");
+      const w = canvas.width = canvas.offsetWidth;
+      const h = canvas.height = 240;
+      ctx.clearRect(0, 0, w, h);
+      if (!daily.length) {
+        ctx.fillStyle = "#a89684"; ctx.font = "14px sans-serif";
+        ctx.fillText("Sem dados ainda", 10, 30); return;
+      }
+      const pad = 30;
+      const max = Math.max(...daily.map(d => d.count), 1);
+      const stepX = (w - pad * 2) / Math.max(daily.length - 1, 1);
+
+      // linha
+      ctx.beginPath();
+      ctx.strokeStyle = "#c79a3e"; ctx.lineWidth = 2;
+      daily.forEach((d, i) => {
+        const x = pad + i * stepX;
+        const y = h - pad - ((d.count / max) * (h - pad * 2));
+        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+
+      // pontos
+      ctx.fillStyle = "#c1352a";
+      daily.forEach((d, i) => {
+        const x = pad + i * stepX;
+        const y = h - pad - ((d.count / max) * (h - pad * 2));
+        ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI * 2); ctx.fill();
+      });
+
+      // max no topo
+      ctx.fillStyle = "#a89684"; ctx.font = "12px sans-serif";
+      ctx.fillText(`máx: ${max}/dia`, pad, 16);
+    }
+
+    // Auto-login se já tem senha na sessão
+    const saved = sessionStorage.getItem("gpw");
+    if (saved) { document.getElementById("password").value = saved; load(); }
+  </script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+{
+  "name": "grimoire-analytics",
+  "version": "1.0.0",
+  "description": "Backend de analytics do Grimoire — eventos anônimos e dashboard de conversão",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "pg": "^8.13.1",
+    "cors": "^2.8.5"
+  }
+}
