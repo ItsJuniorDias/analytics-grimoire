@@ -25,6 +25,19 @@ const DASHBOARD_PASSWORD = process.env.DASHBOARD_PASSWORD || "grimoire";
 const INGEST_KEY = process.env.INGEST_KEY || null; // se null, não exige chave
 
 // ------------------------------------------------------------------
+// Definição do funil: cada etapa mapeia pra uma lista de nomes de
+// evento que contam pra ela. Isso mantém compat com o cliente atual
+// (purchase_started, purchase_completed) e também aceita o padrão dos
+// outros apps (checkout_initiated, subscribe_completed, etc.).
+// ------------------------------------------------------------------
+const FUNNEL_STAGES = {
+  paywall:    ["paywall_viewed", "paywall_view"],
+  checkout:   ["purchase_started", "checkout_initiated"],
+  trials:     ["trial_started", "start_trial"],
+  subscribes: ["purchase_completed", "subscribe_completed"],
+};
+
+// ------------------------------------------------------------------
 // Ingestão de eventos — o app chama isto.
 // ------------------------------------------------------------------
 app.post("/track", async (req, res) => {
@@ -84,28 +97,32 @@ app.get("/api/stats", async (req, res) => {
        FROM events WHERE created_at >= ${since}`
     );
 
-    // ---- FUNIL DE CONVERSÃO ----
-    // Quantos dispositivos únicos passaram por cada etapa-chave.
-    const funnelQuery = async (eventName) => {
+    // ---- FUNIL: Paywall → Checkout → Trials → Subscribes ----
+    // Cada etapa aceita múltiplos nomes de evento (ver FUNNEL_STAGES).
+    // Conta dispositivos únicos que dispararam qualquer um dos eventos
+    // da etapa dentro da janela de tempo.
+    const stageCount = async (eventNames) => {
       const r = await pool.query(
         `SELECT COUNT(DISTINCT device_id)::int AS n
-         FROM events WHERE name = $1 AND created_at >= ${since}`,
-        [eventName]
+         FROM events WHERE name = ANY($1) AND created_at >= ${since}`,
+        [eventNames]
       );
       return r.rows[0].n;
     };
 
     const funnel = {
-      app_opened: await funnelQuery("app_opened"),
-      story_opened: await funnelQuery("story_opened"),
-      paywall_viewed: await funnelQuery("paywall_viewed"),
-      purchase_started: await funnelQuery("purchase_started"),
-      purchase_completed: await funnelQuery("purchase_completed"),
+      paywall:    await stageCount(FUNNEL_STAGES.paywall),
+      checkout:   await stageCount(FUNNEL_STAGES.checkout),
+      trials:     await stageCount(FUNNEL_STAGES.trials),
+      subscribes: await stageCount(FUNNEL_STAGES.subscribes),
     };
 
-    // Taxa de conversão paywall -> assinatura.
-    const conversionRate = funnel.paywall_viewed > 0
-      ? (funnel.purchase_completed / funnel.paywall_viewed) * 100
+    // Conversão geral: quem viu o paywall e virou trial OU assinatura.
+    // Trials + subscribes porque ambos são "converteu" do ponto de vista de negócio.
+    // (Um trial pode virar subscribe depois; contar só subscribes esconde o topo.)
+    const converted = funnel.trials + funnel.subscribes;
+    const conversionRate = funnel.paywall > 0
+      ? (converted / funnel.paywall) * 100
       : 0;
 
     // Eventos por dia (para o gráfico de linha).
@@ -116,13 +133,14 @@ app.get("/api/stats", async (req, res) => {
        GROUP BY day ORDER BY day`
     );
 
-    // Histórias mais abertas (top 10).
+    // Histórias mais abertas (top 10). Aceita story_opened e story_open.
     const topStories = await pool.query(
       `SELECT properties->>'story_id' AS story_id,
               properties->>'title' AS title,
               COUNT(*)::int AS opens
        FROM events
-       WHERE name = 'story_opened' AND created_at >= ${since}
+       WHERE name IN ('story_opened', 'story_open')
+         AND created_at >= ${since}
          AND properties->>'story_id' IS NOT NULL
        GROUP BY story_id, title ORDER BY opens DESC LIMIT 10`
     );
@@ -134,6 +152,7 @@ app.get("/api/stats", async (req, res) => {
       by_event: byEvent.rows,
       funnel,
       conversion_rate: Number(conversionRate.toFixed(2)),
+      converted, // trials + subscribes (numerador da conversão)
       daily: daily.rows,
       top_stories: topStories.rows,
     });

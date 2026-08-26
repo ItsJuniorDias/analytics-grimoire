@@ -1,74 +1,93 @@
-# Grimoire Analytics — Backend
+# Grimoire Analytics
 
-Backend próprio de analytics do app Grimoire. Recebe eventos anônimos
-do app iOS e mostra um dashboard de conversão. Node.js + Express +
-PostgreSQL, pronto para rodar no Render.
+Backend próprio de analytics dos jogos iOS. Recebe eventos anônimos do app
+e mostra um dashboard de conversão. Node.js + Express + PostgreSQL,
+rodando no Render.
 
-## O que ele mede
+## Funil de conversão
 
-Funil de conversão (dispositivos únicos anônimos em cada etapa):
+O dashboard mostra 4 etapas: **Paywall → Checkout → Trials → Subscribes**.
 
-1. `app_opened` — abriu o app
-2. `story_opened` — abriu uma história
-3. `paywall_viewed` — viu o paywall
-4. `purchase_started` — tocou em assinar
-5. `purchase_completed` — assinou
+Cada etapa aceita mais de um nome de evento (pra manter compat com o
+cliente atual e com o padrão que você já usa nos outros apps):
 
-Mais: taxa de conversão do paywall, histórias mais abertas, eventos por dia.
+| Etapa       | Aceita esses eventos                                |
+|-------------|-----------------------------------------------------|
+| Paywall     | `paywall_viewed`, `paywall_view`                    |
+| Checkout    | `purchase_started`, `checkout_initiated`            |
+| Trials      | `trial_started`, `start_trial`                      |
+| Subscribes  | `purchase_completed`, `subscribe_completed`         |
 
-## Deploy no Render (passo a passo)
+A **taxa de conversão geral** = `(trials + subscribes) / paywall`. Junta
+trials com subscribes porque ambos são "converteu do paywall" — trials
+são receita futura provável.
 
-### 1. Suba o código para um repositório (GitHub/GitLab)
-Crie um repositório e faça push desta pasta (`analytics-server`).
+Se um dispositivo dispara `trial_started` E depois `purchase_completed`
+(trial converteu em assinatura), ele conta 1 em cada etapa. É o que você
+quer: dá pra ver a taxa de trial→subscribe olhando os dois números.
 
-### 2. No Render, crie a partir do Blueprint
-- Acesse render.com → New → Blueprint
-- Conecte o repositório
-- O Render lê o `render.yaml` e cria automaticamente:
-  - o serviço web (o servidor)
-  - o banco Postgres (`grimoire-db`)
-  - a conexão entre eles (DATABASE_URL é preenchida sozinha)
+### Rastreando trials
 
-### 3. Defina a senha do dashboard
-No painel do serviço → Environment → defina:
-- `DASHBOARD_PASSWORD` = uma senha sua (para acessar o dashboard)
-- `INGEST_KEY` = (opcional) uma chave; se definir, ponha a mesma no app
+Pra ter dados na coluna Trials, o cliente iOS precisa emitir
+`trial_started` quando o produto comprado tem período de trial. Na
+SubscriptionStore, dá pra fazer algo assim depois do
+`await store.purchase(product)`:
 
-### 4. Deploy
-O Render faz o build e sobe. Ao final você terá uma URL tipo:
-`https://grimoire-analytics.onrender.com`
-
-### 5. Conecte o app
-No arquivo `Core/Analytics.swift` do app iOS, troque:
 ```swift
-private let endpoint = "https://SEU-APP.onrender.com"
+if ok, let subInfo = product.subscription,
+   let intro = subInfo.introductoryOffer,
+   intro.paymentMode == .freeTrial {
+    analytics.track(.trial_started, ["plan": product.id])
+} else if ok {
+    analytics.track(.purchase_completed, ["plan": product.id])
+}
 ```
-pela URL real do seu serviço. Se definiu `INGEST_KEY`, ponha em `ingestKey`.
 
-### 6. Veja o dashboard
-Abra a URL do serviço no navegador, digite a senha, e pronto.
+Enquanto não emitir `trial_started`, a coluna fica em 0 e a conversão
+geral considera só assinaturas efetivadas.
 
-## Rodar localmente (opcional, para testar)
+## Estrutura
 
-Precisa de um Postgres local. Depois:
+```
+analytics-grimoire/
+├── src/
+│   ├── server.js         Express + rotas
+│   └── db.js             Pool Postgres + migration
+├── public/
+│   └── index.html        Dashboard visual
+├── render.yaml           Blueprint pro Render
+└── package.json
+```
+
+## Deploy no Render
+
+Já rodando em `https://analytics-grimoire.onrender.com`. Se precisar
+recriar do zero:
+
+1. Push do código pro GitHub
+2. Render → New → Blueprint → conecta o repo
+3. O `render.yaml` cria web + Postgres + conexão automática
+4. No painel do serviço → Environment → define:
+   - `DASHBOARD_PASSWORD` — senha do dashboard
+   - `INGEST_KEY` — (recomendado) chave que o app precisa mandar em
+     `x-api-key`; sem ela, `/track` fica público e qualquer script pode
+     entupir o banco
+
+## Rodar localmente
+
 ```bash
 npm install
 export DATABASE_URL="postgresql://postgres@localhost:5432/grimoire_analytics"
 export DASHBOARD_PASSWORD="test"
 npm start
 ```
-Abra http://localhost:3000
 
-## Nota sobre o plano free do Render
+Abre http://localhost:3000
 
-O plano gratuito "dorme" após inatividade e demora alguns segundos para
-acordar na primeira requisição. Para analytics isso é irrelevante (os
-eventos são fire-and-forget e o app não espera resposta). O banco free
-tem limite de armazenamento generoso para começar.
+## Plano free do Render
 
-## Privacidade
-
-Tudo é anônimo: cada evento traz um UUID aleatório gerado no app, sem
-vínculo com identidade, Apple ID ou dados pessoais. Ainda assim, declare
-no App Store Connect que o app coleta "dados de uso" (analytics) — mesmo
-anônimo, a Apple pede a declaração.
+- **Web:** dorme após inatividade, demora alguns segundos pra acordar
+  na primeira request. Irrelevante pra analytics (o app é
+  fire-and-forget).
+- **Postgres:** **expira em 30 dias** e o banco é deletado. Pra manter
+  dados históricos, suba pro plano pago mais baixo antes que expire.

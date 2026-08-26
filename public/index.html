@@ -33,10 +33,15 @@
     .card .value.accent { color: var(--brass); }
     .section { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin-bottom: 24px; }
     .section h2 { font-size: 18px; margin-bottom: 16px; }
-    .funnel-step { margin-bottom: 12px; }
-    .funnel-step .row { display: flex; justify-content: space-between; font-size: 14px; margin-bottom: 4px; }
+    .funnel-step { margin-bottom: 16px; }
+    .funnel-step:last-child { margin-bottom: 0; }
+    .funnel-step .row { display: flex; justify-content: space-between; align-items: baseline; font-size: 14px; margin-bottom: 6px; }
+    .funnel-step .row .name { font-weight: 500; }
+    .funnel-step .row .count { font-size: 16px; font-weight: 700; color: var(--text); }
     .funnel-step .bar { height: 28px; background: var(--surface2); border-radius: 6px; overflow: hidden; }
     .funnel-step .fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--brass)); border-radius: 6px; transition: width 0.5s; }
+    /* Taxa de conversão entre etapas — texto pequeno abaixo da barra */
+    .funnel-step .drop { font-size: 12px; color: var(--muted); margin-top: 4px; text-align: right; }
     table { width: 100%; border-collapse: collapse; font-size: 14px; }
     th, td { text-align: left; padding: 10px; border-bottom: 1px solid var(--border); }
     th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; }
@@ -47,7 +52,7 @@
 </head>
 <body>
   <h1>Grimoire Analytics</h1>
-  <p class="sub">Conversão e engajamento — dados anônimos</p>
+  <p class="sub">Conversão de paywall — dados anônimos</p>
 
   <div class="login" id="login">
     <input type="password" id="password" placeholder="Senha do dashboard" />
@@ -85,13 +90,14 @@
   </div>
 
   <script>
-    const FUNNEL_LABELS = {
-      app_opened: "Abriu o app",
-      story_opened: "Abriu uma história",
-      paywall_viewed: "Viu o paywall",
-      purchase_started: "Começou a assinar",
-      purchase_completed: "Assinou",
-    };
+    // Etapas do funil na ordem que aparecem no dashboard.
+    // Nomes batem com as chaves em data.funnel do backend.
+    const FUNNEL_STEPS = [
+      { key: "paywall",    label: "Paywall visto" },
+      { key: "checkout",   label: "Checkout iniciado" },
+      { key: "trials",     label: "Trial iniciado" },
+      { key: "subscribes", label: "Assinou" },
+    ];
 
     async function load() {
       const password = document.getElementById("password").value;
@@ -121,39 +127,58 @@
       document.getElementById("login").classList.remove("hidden");
       document.getElementById("content").classList.remove("hidden");
 
-      // Cards de resumo
+      // Cards de resumo: métricas-chave do novo funil.
+      // "Assinaturas + trials" combina os dois (o que virou receita ou tem chance de virar).
+      const trialsPlusSubs = (data.funnel.trials || 0) + (data.funnel.subscribes || 0);
       document.getElementById("cards").innerHTML = `
+        <div class="card"><div class="label">Paywall visto</div><div class="value">${data.funnel.paywall}</div></div>
+        <div class="card"><div class="label">Assinaturas + trials</div><div class="value accent">${trialsPlusSubs}</div></div>
+        <div class="card"><div class="label">Conversão geral</div><div class="value accent">${data.conversion_rate}%</div></div>
         <div class="card"><div class="label">Dispositivos únicos</div><div class="value">${data.unique_devices}</div></div>
-        <div class="card"><div class="label">Total de eventos</div><div class="value">${data.total_events}</div></div>
-        <div class="card"><div class="label">Assinaram</div><div class="value accent">${data.funnel.purchase_completed}</div></div>
-        <div class="card"><div class="label">Conversão do paywall</div><div class="value accent">${data.conversion_rate}%</div></div>
       `;
 
-      // Funil
-      const steps = Object.keys(FUNNEL_LABELS);
-      const maxVal = Math.max(data.funnel[steps[0]] || 1, 1);
-      document.getElementById("funnel").innerHTML = steps.map(step => {
-        const val = data.funnel[step] || 0;
-        const pct = (val / maxVal) * 100;
+      // Funil visual: barra proporcional ao topo (paywall = 100%) + taxa de conversão
+      // entre a etapa anterior e a atual (mostra onde o funil vaza).
+      const topVal = Math.max(data.funnel[FUNNEL_STEPS[0].key] || 1, 1);
+      document.getElementById("funnel").innerHTML = FUNNEL_STEPS.map((step, i) => {
+        const val = data.funnel[step.key] || 0;
+        const pct = (val / topVal) * 100;
+        // Taxa comparando com a etapa anterior (mostra o "afunilamento").
+        let drop = "";
+        if (i > 0) {
+          const prevVal = data.funnel[FUNNEL_STEPS[i - 1].key] || 0;
+          if (prevVal > 0) {
+            const rate = (val / prevVal) * 100;
+            drop = `<div class="drop">${rate.toFixed(1)}% da etapa anterior</div>`;
+          }
+        }
         return `<div class="funnel-step">
-          <div class="row"><span>${FUNNEL_LABELS[step]}</span><span>${val}</span></div>
+          <div class="row"><span class="name">${step.label}</span><span class="count">${val}</span></div>
           <div class="bar"><div class="fill" style="width:${pct}%"></div></div>
+          ${drop}
         </div>`;
       }).join("");
 
       // Tabela de histórias
       const storiesBody = document.querySelector("#stories tbody");
       storiesBody.innerHTML = data.top_stories.length
-        ? data.top_stories.map(s => `<tr><td>${s.title || s.story_id}</td><td>${s.opens}</td></tr>`).join("")
+        ? data.top_stories.map(s => `<tr><td>${escapeHtml(s.title || s.story_id)}</td><td>${s.opens}</td></tr>`).join("")
         : `<tr><td colspan="2" style="color:var(--muted)">Sem dados ainda</td></tr>`;
 
       // Tabela de eventos
       const eventsBody = document.querySelector("#events tbody");
       eventsBody.innerHTML = data.by_event.length
-        ? data.by_event.map(e => `<tr><td>${e.name}</td><td>${e.count}</td></tr>`).join("")
+        ? data.by_event.map(e => `<tr><td>${escapeHtml(e.name)}</td><td>${e.count}</td></tr>`).join("")
         : `<tr><td colspan="2" style="color:var(--muted)">Sem dados ainda</td></tr>`;
 
       drawChart(data.daily);
+    }
+
+    // Escape básico — evita quebrar layout se algum nome tiver caracteres especiais.
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, c => (
+        { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+      ));
     }
 
     // Gráfico de linha simples desenhado no canvas (sem bibliotecas externas).
