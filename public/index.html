@@ -216,9 +216,15 @@
       // Cards de resumo: métricas-chave do novo funil.
       // "Assinaturas + trials" combina os dois (o que virou receita ou tem chance de virar).
       const trialsPlusSubs = (data.funnel.trials || 0) + (data.funnel.subscribes || 0);
+      // Contagem BRUTA de paywall_viewed (não é dispositivos únicos — é
+      // quantas vezes o evento foi disparado). Vem de by_event, casa com
+      // os nomes que o backend aceita em FUNNEL_STAGES.paywall.
+      const paywallCount = data.by_event
+        .filter(e => e.name === "paywall_viewed" || e.name === "paywall_view")
+        .reduce((s, e) => s + e.count, 0);
       document.getElementById("cards").innerHTML = `
-        <div class="card"><div class="label">Dispositivos que viram paywall</div><div class="value">${data.funnel.paywall}</div></div>
-        <div class="card"><div class="label">Dispositivos que assinaram / testaram</div><div class="value accent">${trialsPlusSubs}</div></div>
+        <div class="card"><div class="label">Paywall visto</div><div class="value">${paywallCount}</div></div>
+        <div class="card"><div class="label">Assinaram / testaram</div><div class="value accent">${trialsPlusSubs}</div></div>
         <div class="card"><div class="label">Conversão geral</div><div class="value accent">${data.conversion_rate}%</div></div>
         <div class="card"><div class="label">Dispositivos únicos</div><div class="value">${data.unique_devices}</div></div>
       `;
