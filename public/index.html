@@ -112,6 +112,11 @@
     </div>
 
     <div class="section">
+      <h2>Dispositivos por país</h2>
+      <table id="countries"><thead><tr><th>País</th><th>Dispositivos únicos</th></tr></thead><tbody></tbody></table>
+    </div>
+
+    <div class="section">
       <h2>Todos os eventos</h2>
       <table id="events"><thead><tr><th>Evento</th><th>Total</th></tr></thead><tbody></tbody></table>
     </div>
@@ -244,6 +249,20 @@
       const storiesBody = document.querySelector("#stories tbody");
       storiesBody.innerHTML = data.top_stories.length
         ? data.top_stories.map(s => `<tr><td>${escapeHtml(s.title || s.story_id)}</td><td>${s.opens}</td></tr>`).join("")
+        : `<tr><td colspan="2" style="color:var(--muted)">Sem dados ainda</td></tr>`;
+
+      // Tabela de países: bandeira grande + código, seguido do count.
+      // top_countries pode não existir em respostas antigas do cache do
+      // browser; fallback pra array vazio evita crash.
+      const countriesBody = document.querySelector("#countries tbody");
+      const countries = data.top_countries || [];
+      countriesBody.innerHTML = countries.length
+        ? countries.map(c =>
+            `<tr>
+              <td><span style="font-size:20px;margin-right:8px;vertical-align:middle;">${flagEmoji(c.country)}</span>${escapeHtml(c.country)}</td>
+              <td>${c.devices}</td>
+            </tr>`
+          ).join("")
         : `<tr><td colspan="2" style="color:var(--muted)">Sem dados ainda</td></tr>`;
 
       // Tabela de eventos

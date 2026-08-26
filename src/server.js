@@ -62,6 +62,13 @@ app.post("/track", async (req, res) => {
     const rawCountry = typeof req.body.country === "string" ? req.body.country.trim().toUpperCase() : null;
     const country = rawCountry && rawCountry.length === 2 ? rawCountry : null;
 
+    // Debug: se country não veio ou veio inválido, loga o body inteiro pra
+    // saber o que o cliente iOS mandou (undefined? typo tipo countryCode?
+    // string vazia? 3 letras?). Aparece nos logs do Render.
+    if (!country) {
+      console.warn(`[track] country vazio (evento ${req.body.name}) — body.country=${JSON.stringify(req.body.country)} keys=[${Object.keys(req.body || {}).join(",")}]`);
+    }
+
     await pool.query(
       `INSERT INTO events (device_id, name, properties, app_version, platform, country)
        VALUES ($1, $2, $3, $4, $5, $6)`,
@@ -149,6 +156,15 @@ app.get("/api/stats", async (req, res) => {
        GROUP BY story_id, title ORDER BY opens DESC LIMIT 10`
     );
 
+    // Top países por dispositivos únicos (top 10). Filtra country IS NOT NULL
+    // porque eventos antigos (antes da migration da coluna) ficam sem país.
+    const topCountries = await pool.query(
+      `SELECT country, COUNT(DISTINCT device_id)::int AS devices
+       FROM events
+       WHERE created_at >= ${since} AND country IS NOT NULL
+       GROUP BY country ORDER BY devices DESC LIMIT 10`
+    );
+
     res.json({
       days,
       total_events: byEvent.rows.reduce((s, r) => s + r.count, 0),
@@ -159,6 +175,7 @@ app.get("/api/stats", async (req, res) => {
       converted, // trials + subscribes (numerador da conversão)
       daily: daily.rows,
       top_stories: topStories.rows,
+      top_countries: topCountries.rows,
     });
   } catch (err) {
     console.error("Erro no /api/stats:", err);
